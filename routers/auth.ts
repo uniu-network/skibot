@@ -1,28 +1,24 @@
-import express from 'express';
-import jwtHelper from '../app/JwtHelper.js';
+import { Elysia } from 'elysia';
+import jwtHelper from '../app/jwtHelper.js';
 import config from '../app/config.js';
-const AuthRoutes = express.Router();
-await import('express-async-errors')
 
+const AuthRoutes = new Elysia({ prefix: '/auth' })
+    .post('/login', ({ body, cookie, status }) => {
+        const { username, password } = body as any;
+        if (username === config.get('web.username') && password === config.get('web.password')) {
+            cookie.token.value = jwtHelper.issueToken({
+                username,
+                password,
+            }, 86400000);
+            cookie.token.path = '/';
+            cookie.token.maxAge = 86400000;
+            return { code: 0 };
+        }
 
-AuthRoutes.post("/login",(req,res)=>{
-    const {username,password} = req.body;
-    if (username === config.get('web.username') && password === config.get('web.password')) {
-        res.cookie('token',jwtHelper.issueToken({
-            "username": username,
-            "password": password
-        },86400000),{
-            path: "/",
-            maxAge: 86400000
-        })
-    }
-    else{
-        res.json({
-            "code": 401,
-            "message": "username or password error"
+        return status(401, {
+            code: 401,
+            message: 'username or password error',
         });
-    }
-    res.send()
-})
+    });
 
 export default AuthRoutes;
