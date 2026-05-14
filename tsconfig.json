@@ -1,12 +1,14 @@
 {
   "extends": ["@tsconfig/node20"],
   "compilerOptions": {
+    "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "sourceMap": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "resolveJsonModule": true,
     "outDir": "dist",
+    "declaration": true,
     "skipLibCheck": true,
     "allowJs": true,
     "esModuleInterop": true,
@@ -14,9 +16,11 @@
   },
   "exclude": [
     "node_modules",
+    "frontend",
     "public/**/*",
     "plugins",
     "dist",
-    "scripts"
+    "scripts",
+    "adapters/**/frontend/**"
   ]
 }

@@ -2,7 +2,7 @@
   <n-layout style="height: 100vh;">
     <n-layout-content>
       <n-flex direction="column" justify="center" align="center" style="height: 100%; padding-top: 100px;">
-        <n-form :model="form" :rules="rules" ref="formRef" label-placement="top" style="width: 800px;">
+        <n-form :model="form" :rules="rules" ref="formRef" label-placement="top" style="width: min(800px, calc(100vw - 32px));">
           <n-form-item label="用户名" path="username">
             <n-input v-model:value="form.username" placeholder="请输入用户名" />
           </n-form-item>
@@ -52,7 +52,6 @@ async function handleSubmit() {
         'Content-Type': 'application/json',
       },
     });
-    console.log(res.data);
     if (res.status === 200) {
       loadingRef.value = false;
       message.success('登录成功');

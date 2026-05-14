@@ -1,0 +1,9 @@
+name: "Bot-1"
+self_id: 12345
+prefix:
+  - /
+adapters:
+  - type: onebotHttp
+    config:
+      url: http://127.0.0.1:5700
+plugin_config: {}

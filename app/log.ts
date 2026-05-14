@@ -1,16 +1,27 @@
-import config from "./config.js";
+import * as fs from 'fs';
+import * as yaml from 'js-yaml';
 
 class Logger {
   private readonly RESET = "\x1b[0m";
   private readonly GREEN = "\x1b[32m";
   private readonly YELLOW = "\x1b[33m";
+  private readonly LEVEL_WEIGHT: Record<string, number> = {
+      "TRACE": 0,
+      "DEBUG": 10,
+      "INFO": 20,
+      "SUCCESS": 20,
+      "WARN": 30,
+      "ERROR": 40
+  };
   private readonly LEVEL_COLORS: Record<string, string> = {
+      "TRACE": "\x1b[90m",
       "INFO": "\x1b[37m",
       "WARN": "\x1b[33m",
       "ERROR": "\x1b[31m",
       "SUCCESS": "\x1b[92m",
       "DEBUG": "\x1b[36m"
   };
+  private configuredLevel: string | null = null;
 
   private getCallerInfo() {
       try {
@@ -28,7 +39,37 @@ class Logger {
       return { filename: 'unknown', func: 'unknown', line: 0 };
   }
 
+  private getLevel(): string {
+      const level = process.env.LOG_LEVEL?.toUpperCase() || this.getConfiguredLevel();
+      return this.LEVEL_WEIGHT[level] === undefined ? 'INFO' : level;
+  }
+
+  private getConfiguredLevel(): string {
+      if (this.configuredLevel !== null) return this.configuredLevel;
+
+      try {
+          const configFile = './config/config.yml';
+          if (!fs.existsSync(configFile)) {
+              this.configuredLevel = 'INFO';
+              return this.configuredLevel;
+          }
+
+          const config = yaml.load(fs.readFileSync(configFile, 'utf8')) as any;
+          this.configuredLevel = String(config?.log?.level || 'INFO').toUpperCase();
+      } catch (e) {
+          this.configuredLevel = 'INFO';
+      }
+
+      return this.configuredLevel;
+  }
+
+  private shouldLog(level: string): boolean {
+      return this.LEVEL_WEIGHT[level] >= this.LEVEL_WEIGHT[this.getLevel()];
+  }
+
   private log(level: string, message: string) {
+      if (!this.shouldLog(level)) return;
+
       const now = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
       const caller = this.getCallerInfo();
       const levelColor = this.LEVEL_COLORS[level] || this.RESET;
@@ -59,27 +100,11 @@ class Logger {
   public debug(message: string) {
       this.log("DEBUG", message);
   }
+
+  public trace(message: string) {
+      this.log("TRACE", message);
+  }
 }
 
 const logger = new Logger();
-
-export class AdapterLog {
-  name: string;
-  constructor(name: string){
-    this.name = name;
-  }
-  info(message: string){
-    return logger.info(`[Adapter ${this.name}] ${message}`);
-  }
-  error(message: string, err: Error){
-    return logger.error(`[Adapter ${this.name}] ${message} ${err.stack}`);
-  }
-  warn(message: string){
-    return logger.warn(`[Adapter ${this.name}] ${message}`);
-  }
-  debug(message: string){
-    return logger.debug(`[Adapter ${this.name}] ${message}`);
-  }
-}
-export const adapterLog = new AdapterLog(config.get('adapter.use'));
 export default logger;
