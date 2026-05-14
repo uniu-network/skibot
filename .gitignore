@@ -26,4 +26,5 @@ data/jwt/*.*
 **/cert
 /logs
 docs
+*.timestamp-*
 
