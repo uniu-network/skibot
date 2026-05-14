@@ -1,75 +1,139 @@
-import axios from 'axios';
-import { BotEvent, BotMessageEvent, messageevent, metaevent, requestevent, noticeevent, RequestEvent,NoticeEvent,MetaEvent, GroupMessageEvent, } from "./events.js";
-import { Message, MessageClass, MessageSegment } from "./messages.js";
-import  config  from "./config.js";
-import { PrivateMessageEvent } from './events.js';
+import { BotEvent, BotMessageEvent, BotSendEvent, GroupMessageEvent, PrivateMessageEvent } from "./events.js";
+import { Message, MessageSegment } from "./messages.js";
 import logger from './log.js';
-import counter from './counter.js';
+import { IAdapter, IHandler, AdapterContext } from './types.js';
 import async from 'async';
-async function call_api(path: string, body: object) {
-    const res = await axios.post(`${config.get('onebot.url')}${path}`, body);
-    return res.data;
+import { parseArgs, type ParsedArgs } from './argParser.js';
+
+export function normalizePrefix(prefix: string | string[] | undefined): string[] {
+    if (!prefix) return ['/'];
+    if (Array.isArray(prefix)) return prefix.map(s => String(s));
+    return [String(prefix)];
+}
+
+export function escapeRegex(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export class FinishSignal extends Error {
+    constructor() {
+        super('finish');
+        this.name = 'FinishSignal';
+    }
 }
 
 const BOTS: { [key: number]: Bot } = {};
 
-
-
-export function get_bot(id: number): Bot {
+export function getBot(id: number, prefix?: string | string[]): Bot {
     if (!(id in BOTS)) {
-        BOTS[id] = new Bot(id);
+        BOTS[id] = new Bot(id, prefix);
     }
     return BOTS[id];
 }
-export class SendMessageClass {
-    static async send_group_msg(group_id: number, message: MessageClass) {
-        await call_api(`/send_group_msg`,{
-            'group_id': group_id,
-            'message': message.json()
-        })
-    }
-    static async send_private_msg(user_id: number, message: MessageClass) {
-        await call_api(`/send_private_msg`,{
-            'user_id': user_id,
-           'message': message.json()
-        })
-    }
-    static async approve_group(flag: any, sub_type: any) {
+
+export class Handler implements IHandler {
+    private _event: BotEvent;
+    private _bot: Bot | null;
+
+    constructor(event: BotEvent, bot: Bot | null = null) {
+        this._event = event;
+        this._bot = bot;
     }
 
-    static async reject_group(flag: any, sub_type: any, reason: any = "") {
-    }
+    finish(message: Message): Promise<void> {
+        let sendTask: Promise<void> | null = null;
+        let messageType: string | null = null;
+        let targetId: number | null = null;
 
-    static async approve_friend(flag: any, remark: any = "") {
-    }
+        if (this._event instanceof GroupMessageEvent) {
+            messageType = 'group';
+            targetId = this._event.group_id;
+            sendTask = this._event.adapter.send_group_msg(this._event.group_id, message);
+        } else if (this._event instanceof PrivateMessageEvent) {
+            messageType = 'private';
+            targetId = this._event.user_id;
+            sendTask = this._event.adapter.send_private_msg(this._event.user_id, message);
+        }
 
-    static async reject_friend(flag: any) {
+        if (sendTask && messageType && targetId !== null) {
+            sendTask.then(() => {
+                if (this._bot) {
+                    const sendEvent = new BotSendEvent(
+                        Date.now(),
+                        this._event.self_id,
+                        this._event.adapter_id,
+                        this._event.adapter,
+                        messageType,
+                        targetId,
+                        message.json(),
+                    );
+                    this._bot.emitEvent('bot_send', sendEvent);
+                }
+            }).catch((e) => {
+                logger.error(`error when sending finish message, ${e}`);
+            });
+        } else {
+            sendTask?.catch((e) => {
+                logger.error(`error when sending finish message, ${e}`);
+            });
+        }
+
+        throw new FinishSignal();
     }
 }
+
 export class Bot {
     public self_id: number;
-    private messageevent: BotMessageEvent;
-    private noticeevent: NoticeEvent;
-    private requestevent: RequestEvent;
-    private metaevent: MetaEvent;
-    private eventHandlers: { [eventName: string]: Function[] } = {};
-    private eventQueue = [];
+    public prefix: string[];
+    private adapters: Map<string, IAdapter> = new Map();
+    private eventHandlers: Map<string, Array<{ callback: Function; scope?: string }>> = new Map();
+    private eventQueue: Array<{ eventName: string; event: BotEvent }> = [];
     public commands: Array<any>;
-    constructor(self_id: number) {
-        this.messageevent = null;
-        this.noticeevent = null;
-        this.requestevent = null;
-        this.metaevent = null;
+    private currentScope: string | null = null;
+
+    constructor(self_id: number, prefix: string | string[] = ['/']) {
         this.self_id = self_id;
-        this.startEventLoop();
+        this.prefix = normalizePrefix(prefix);
         this.commands = [];
+        this.startEventLoop();
         BOTS[self_id] = this;
     }
 
-    resiger_command(command: string, description: string) {
+    async useAdapter(adapter: IAdapter): Promise<void> {
+        this.adapters.set(adapter.id, adapter);
+        const ctx: AdapterContext = {
+            bot: this,
+            db: null,
+            emitEvent: (eventName, event) => this.emitEvent(eventName, event)
+        };
+        await adapter.start(ctx);
+        logger.info(`Adapter "${adapter.name}" (${adapter.id}) started`);
+    }
+
+    async stopAdapters(): Promise<void> {
+        for (const adapter of this.adapters.values()) {
+            try {
+                await adapter.stop();
+            } catch (e) {
+                logger.error(`Error stopping adapter ${adapter.id}: ${e}`);
+            }
+        }
+        this.adapters.clear();
+    }
+
+    getAdapter<T extends IAdapter>(id: string): T | undefined {
+        return this.adapters.get(id) as T | undefined;
+    }
+
+    emitEvent<TEvent extends BotEvent = BotEvent>(eventName: string, event: TEvent): void {
+        this.eventQueue.push({ eventName, event });
+    }
+
+    registerCommand(command: string, description: string, scope?: string) {
         const data = {
             command: command,
             description: description,
+            scope: scope || this.currentScope || undefined,
         };
         if (this.commands.some(cmd => cmd.command === command)) {
             throw new Error("Command already registered");
@@ -77,151 +141,116 @@ export class Bot {
         this.commands.push(data);
     }
 
-
-    on(event: string, callback: (event: BotEvent,handler:HandlerClass,reply_msg:MessageClass) => void) {
+    on<TEvent extends BotEvent = BotEvent>(event: string, callback: (event: TEvent, handler: Handler, reply_msg: Message) => void | Promise<void>) {
         const eventName = event.toLowerCase();
-        if (!this.eventHandlers[eventName]) {
-            this.eventHandlers[eventName] = [];
+        if (!this.eventHandlers.has(eventName)) {
+            this.eventHandlers.set(eventName, []);
         }
-        this.eventHandlers[eventName].push(callback);
-        this.eventQueue.push(event);
+        this.eventHandlers.get(eventName).push({ callback, scope: this.currentScope || undefined });
     }
 
-    command(command: string, description: string, callback: (arg: string,handler:HandlerClass,reply_msg:MessageClass,event: BotMessageEvent) => void) {
-        this.resiger_command(command, description);
+    async withScope(scope: string, callback: () => Promise<void> | void): Promise<void> {
+        const previousScope = this.currentScope;
+        this.currentScope = scope;
+        try {
+            await callback();
+        } finally {
+            this.currentScope = previousScope;
+        }
+    }
 
-        const handler = async (event: any,handler:any,reply_msg:any) => {
-            const prefix = config.get("prefix");
-            const regex = new RegExp(`^${prefix}${command}`);
-            if (regex.test(event.raw_message)) {
-                const args = event.raw_message.split(" ").slice(1);
-                setImmediate(async() => {
-                    await counter.add_user(event.sender.user_id)
-                  });
-                try{
-                await callback(args,handler,reply_msg,event);
-                return
+    unloadScope(scope: string): void {
+        this.commands = this.commands.filter(command => command.scope !== scope);
+        for (const [eventName, handlers] of this.eventHandlers.entries()) {
+            const nextHandlers = handlers.filter(handler => handler.scope !== scope);
+            if (nextHandlers.length === 0) {
+                this.eventHandlers.delete(eventName);
+            } else {
+                this.eventHandlers.set(eventName, nextHandlers);
+            }
+        }
+    }
+
+    command(command: string, description: string, callback: (arg: ParsedArgs, handler: Handler, reply_msg: Message, event: BotMessageEvent) => void) {
+        this.registerCommand(command, description);
+
+        const handler = async (event: any, handlerObj: any, reply_msg: any) => {
+            const prefixes = this.prefix;
+            const prefixGroup = prefixes.map(p => escapeRegex(p)).join('|');
+            const regex = new RegExp(`^(?:${prefixGroup})${escapeRegex(command)}(?:\\s+(.*))?$`);
+            const match = regex.exec(event.raw_message);
+            if (match) {
+                const rawArgs = match[1] ? match[1].split(/\s+/) : [];
+                const args = parseArgs(rawArgs);
+                try {
+                    await callback(args, handlerObj, reply_msg, event);
+                    return
                 }
-                catch(e){
+                catch (e) {
+                    if (e instanceof FinishSignal) return;
                     logger.error(`error when handling command ${command}, ${e}`)
                     await this.handleError(e, event);
-                    return;                }
+                    return;
+                }
             }
         };
 
         this.on('message', handler);
     }
-    private async handleError(error: Error,event: BotEvent){
+
+    private async handleError(error: Error, event: BotEvent) {
         const message = new Message()
-        const handler = new Handler(event)
-        message.addMessage(MessageSegment.text(`在响应 ${event.constructor.name} 事件时出错: ${error}`))
-        handler.finish(message)
+        const handler = new Handler(event, this)
+        message.addMessage(MessageSegment.text(`在处理 ${event.constructor.name} 事件时出错: ${error}`))
+        try {
+            await handler.finish(message)
+        } catch (e) {
+            // FinishSignal is expected from finish()
+        }
     }
+
     private invokeCallbacks(eventName: string, event: BotEvent) {
         return new Promise<void>((resolve, reject) => {
-            if (this.eventHandlers[eventName]) {
-                const handlers = this.eventHandlers[eventName];
-                async.parallel(
-                    handlers.map(handler => {
-                        return function(callback) {
-                            handler(event, new Handler(event), new Message())
-                            .then(() => callback(null))
-                                .catch(error => {
-                                    console.error(`Error in handler for event ${eventName}:`, error);
-                                    this.handleError(error, event)
-                                        .then(() => callback(null))
-                                        .catch(err => callback(err));
-                                });
-                        };
-                    }),
-                    (err) => {
-                        if (err) {
-                            reject(err);
-                        } else {
-                            resolve();
-                        }
-                    }
-                );
-            } else {
+            const handlers = this.eventHandlers.get(eventName);
+            if (!handlers || handlers.length === 0) {
                 resolve();
+                return;
             }
+            async.parallel(
+                handlers.map(handler => {
+                    return (callback: Function) => {
+                        Promise.resolve(handler.callback(event, new Handler(event, this), new Message()))
+                            .then(() => callback(null))
+                            .catch((error: Error) => {
+                                if (error instanceof FinishSignal) {
+                                    callback(null);
+                                    return;
+                                }
+                                console.error(`Error in handler for event ${eventName}:`, error);
+                                this.handleError(error, event)
+                                    .then(() => callback(null))
+                                    .catch(err => callback(err));
+                            });
+                    };
+                }),
+                (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve();
+                    }
+                }
+            );
         });
     }
-    
-    private startEventLoop() {
-        const eventHandlers = new Map<string, (event: any) => void>([
-            ['message', async (event) => {
-                if (messageevent != null && messageevent !== this.messageevent) {
-                    this.messageevent = messageevent;
-                    await this.invokeCallbacks(event, messageevent);
-                    
-                }
-            }],
-            ['notice', async (event) => {
-                if (noticeevent != null && noticeevent !== this.noticeevent) {
-                    await this.invokeCallbacks(event, noticeevent);
-                    this.noticeevent = noticeevent;
-                }
-            }],
-            ['request', async (event) => {
-                if (requestevent != null && requestevent !== this.requestevent) {
-                    await this.invokeCallbacks(event, requestevent);
-                    this.requestevent = requestevent;
-                }
-            }],
-            ['meta_event', async (event) => {
-                if (metaevent != null && metaevent !== this.metaevent) {
-                    await this.invokeCallbacks(event, metaevent);
-                    this.metaevent = metaevent;
-                }
-            }],
-        ]);
 
+    private startEventLoop() {
         setInterval(async () => {
-            for (const event of this.eventQueue) {
-                const handler = eventHandlers.get(event);
-                if (handler) {
-                    await handler(event);
-                }
+            const queue = [...this.eventQueue];
+            this.eventQueue = [];
+            for (const { eventName, event } of queue) {
+                await this.invokeCallbacks(eventName, event);
             }
         }, 0);
     }
-    
-
-
-}
-
-export class HandlerClass{
-    private _event: BotEvent;
-    private _send: Function;
-    constructor(event: BotEvent) {
-        this._event = event;
-        this._send = null
-    }
-    async finish(message: MessageClass){
-        console.log(222)
-        if (this._event instanceof GroupMessageEvent){
-            this._send = SendMessage.send_group_msg;
-            return this._send(this._event.group_id, message);
-        }
-        if (this._event instanceof PrivateMessageEvent){
-            this._send = SendMessage.send_private_msg;
-            return this._send(this._event.user_id, message);
-        }
-    }
-}
-let SendMessage = SendMessageClass;
-let Handler = HandlerClass;
-if (config.get('adapter.enable')) {
-    (async () => {
-        const adapter = await import(`../adapters/${config.get('adapter.use')}/index.js`);
-        Handler = adapter.Handler;
-        SendMessage = adapter.SendMessage;
-    })();
-}
-
-
-export {
-    SendMessage,
-    Handler
 }
