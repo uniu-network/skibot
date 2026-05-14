@@ -1,0 +1,6 @@
+{
+  "name": "help",
+  "description": "提供 /help 指令，列出所有可用命令",
+  "version": "1.0.0",
+  "author": "unify-z"
+}
