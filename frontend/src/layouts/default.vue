@@ -61,16 +61,15 @@
 </template>
 
 <script setup lang="js">
-import { LogIn, AppsSharp,LogOut,Albums } from "@vicons/ionicons5";
-import { ref, h, onMounted, computed, provide, inject } from "vue";
-import { useDialog } from "naive-ui";
+import { LogIn, AppsSharp, Albums, People, ExtensionPuzzle, ChatbubblesSharp, TerminalSharp } from "@vicons/ionicons5";
+import { ref, h, onMounted, computed } from "vue";
+import { useStore } from "vuex";
 import TopBar from '../components/TopBar.vue';
 import router from '../router';
 
+const store = useStore();
 const collapsed = ref(true);
-const isphone = ref(false);
-provide('isphone', isphone);
-const getToken = inject('getToken');
+const isphone = computed(() => store.state.isphone);
 
 const menuOptions = [
   {
@@ -90,6 +89,38 @@ const menuOptions = [
     },
   },
   {
+    label: "Bot管理",
+    key: "bots",
+    icon: People,
+    onClick: () => {
+      router.push("/dashboard/bots");
+    },
+  },
+  {
+    label: "适配器管理",
+    key: "adapters",
+    icon: ExtensionPuzzle,
+    onClick: () => {
+      router.push("/dashboard/adapters");
+    },
+  },
+  {
+    label: "消息记录",
+    key: "messages",
+    icon: ChatbubblesSharp,
+    onClick: () => {
+      router.push("/dashboard/messages");
+    },
+  },
+  {
+    label: "指令管理",
+    key: "commands",
+    icon: TerminalSharp,
+    onClick: () => {
+      router.push("/dashboard/commands");
+    },
+  },
+  {
     label: "登录",
     key: "login",
     icon: LogIn,
@@ -97,31 +128,14 @@ const menuOptions = [
       router.push('/dashboard/auth/login');
     },
   },
-  {
-    label: "登出",
-    key: "logout",
-    icon: LogOut,
-    onClick: () => {
-      document.cookie = "token=; path=/; max-age=0"
-      window.location.href = '/dashboard/';
-    },
-  },
 ];
 
 const filteredMenuOptions = computed(() => {
-  const token = getToken();
+  const token = store.getters.token;
   return menuOptions.filter(option => {
-    if (!token && option.key === 'overview') {
-      return false; 
-    }
-    if (!token && option.key === 'plugins') {
-      return false; 
-    }
-    if (!token && option.key === 'logout') {
-      return false; 
-    }
+    if (!token && ['overview', 'plugins', 'bots', 'adapters', 'messages', 'commands'].includes(option.key)) return false;
     if (token && option.key === 'login') {
-      return false; 
+      return false;
     }
     return true;
   });
@@ -130,7 +144,7 @@ const filteredMenuOptions = computed(() => {
 function IsPhone() {
   const info = navigator.userAgent;
   const isPhone = /mobile/i.test(info);
-  isphone.value = isPhone;
+  store.commit('setIsphone', isPhone);
   return isPhone;
 }
 
@@ -145,10 +159,14 @@ function renderMenuIcon(option) {
   return h(option.icon);
 }
 
+function expandIcon() {
+  return h('span', '▶');
+}
+
 onMounted(() => {
   IsPhone();
-  if (!getToken() && !window.location.pathname.startsWith('/dashboard/auth')) {
+  if (!store.getters.token && !window.location.pathname.startsWith('/dashboard/auth')) {
     router.push('/dashboard/auth/login');
-    }
+  }
 });
 </script>
