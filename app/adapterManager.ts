@@ -221,11 +221,6 @@ export class AdapterManager {
     }
 
     static getAvailableTypes(): Array<{ id: string; name: string; defaultConfig: Record<string, any> }> {
-        const KNOWN_ADAPTERS: Record<string, { name: string; defaultConfig: Record<string, any> }> = {
-            webchat: { name: 'WebChat', defaultConfig: { host: '0.0.0.0', port: 8080 } },
-            onebotHttp: { name: 'OneBot HTTP', defaultConfig: { url: 'http://127.0.0.1:5700' } },
-        };
-
         const result: Array<{ id: string; name: string; defaultConfig: Record<string, any> }> = [];
         const adaptersDir = path.resolve('./adapters');
         if (!fs.existsSync(adaptersDir)) return result;
@@ -236,15 +231,36 @@ export class AdapterManager {
             const indexPath = path.join(adapterDir, 'index.ts');
             if (!fs.existsSync(indexPath)) continue;
 
-            const known = KNOWN_ADAPTERS[dir];
+            const metadata = this.readAdapterMetadata(adapterDir, dir);
             result.push({
-                id: dir,
-                name: known?.name || dir,
-                defaultConfig: known?.defaultConfig || {},
+                id: metadata.id,
+                name: metadata.name,
+                defaultConfig: metadata.defaultConfig,
             });
         }
 
         return result;
+    }
+
+    private static readAdapterMetadata(adapterDir: string, fallbackId: string): { id: string; name: string; defaultConfig: Record<string, any> } {
+        const metadataPath = path.join(adapterDir, 'adapter.json');
+        if (!fs.existsSync(metadataPath)) {
+            return { id: fallbackId, name: fallbackId, defaultConfig: {} };
+        }
+
+        try {
+            const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+            const id = typeof metadata.id === 'string' && metadata.id ? metadata.id : fallbackId;
+            const name = typeof metadata.name === 'string' && metadata.name ? metadata.name : id;
+            const defaultConfig = metadata.defaultConfig && typeof metadata.defaultConfig === 'object' && !Array.isArray(metadata.defaultConfig)
+                ? metadata.defaultConfig
+                : {};
+
+            return { id, name, defaultConfig };
+        } catch (e) {
+            logger.warn(`Failed to read adapter metadata ${metadataPath}: ${e}`);
+            return { id: fallbackId, name: fallbackId, defaultConfig: {} };
+        }
     }
 
     close(): void {

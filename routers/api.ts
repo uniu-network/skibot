@@ -8,6 +8,7 @@ import jwtHelper from '../app/jwtHelper.js';
 import { validateConfig } from '../app/pluginConfig.js';
 import { getConfigSchema } from '../app/pluginBase.js';
 import { AdapterManager } from '../app/adapterManager.js';
+import databaseManager from '../app/database/manager.js';
 
 interface ApiRoutesDeps {
     botManager: BotManager;
@@ -547,6 +548,245 @@ export function createApiRoutes(deps: ApiRoutesDeps): AnyElysia {
         const { response, instance } = requireInstance(ctx as ApiContext);
         if (!instance) return response;
         return instance.bot.commands;
+    });
+
+    router.get('/db/tables', async () => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        try {
+            const tables = await databaseManager.listTables();
+            const engine = databaseManager.getEngineType();
+            const tableInfos = await Promise.all(tables.map(async (name) => {
+                const count = await databaseManager.getRowCount(name);
+                return { name, rowCount: count };
+            }));
+            return { engine, tables: tableInfos };
+        } catch (e: any) {
+            return error(500, { code: 500, message: e.message || String(e) });
+        }
+    });
+
+    router.get('/db/table/:name', async ({ params }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        try {
+            const columns = await databaseManager.describeTable(tableName);
+            const rowCount = await databaseManager.getRowCount(tableName);
+            return { name: tableName, columns, rowCount };
+        } catch (e: any) {
+            return error(404, { code: 404, message: e.message || String(e) });
+        }
+    });
+
+    router.get('/db/table/:name/data', async ({ params, query }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        const q = query as Record<string, string | undefined>;
+        const limit = Math.min(Math.max(parseInt(q?.limit || '50') || 50, 1), 500);
+        const offset = Math.max(parseInt(q?.offset || '0') || 0, 0);
+        const sortBy = q?.sortBy || undefined;
+        const sortOrder = q?.sortOrder === 'desc' ? 'DESC' : 'ASC';
+
+        try {
+            let sql = `SELECT * FROM "${tableName}"`;
+            if (sortBy) {
+                sql += ` ORDER BY "${sortBy}" ${sortOrder}`;
+            }
+            sql += ` LIMIT ${limit} OFFSET ${offset}`;
+            const rows = await databaseManager.queryRaw(sql);
+            const totalCount = await databaseManager.getRowCount(tableName);
+            return { rows, total: totalCount, limit, offset };
+        } catch (e: any) {
+            return error(500, { code: 500, message: e.message || String(e) });
+        }
+    });
+
+    router.post('/db/query', async ({ body }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const b = body as any;
+        const sql = b?.sql;
+        if (!sql || typeof sql !== 'string') {
+            return error(400, { code: 400, message: 'sql is required' });
+        }
+
+        const forbidden = /\b(DROP\s+DATABASE|ALTER\s+DATABASE|CREATE\s+DATABASE)\b/i;
+        if (forbidden.test(sql)) {
+            return error(403, { code: 403, message: 'this SQL statement is not allowed' });
+        }
+
+        try {
+            const trimmed = sql.trim().toUpperCase();
+            if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA') || trimmed.startsWith('EXPLAIN') || trimmed.startsWith('WITH')) {
+                const rows = await databaseManager.queryRaw(sql);
+                return { type: 'query', rows, rowCount: rows.length };
+            } else {
+                const result = await databaseManager.executeRaw(sql);
+                return { type: 'execute', changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+            }
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
+    });
+
+    router.post('/db/table/:name/row', async ({ params, body }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        const data = (body as any)?.data;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        if (!data || typeof data !== 'object') {
+            return error(400, { code: 400, message: 'data object is required' });
+        }
+
+        try {
+            const columns = Object.keys(data);
+            const values = Object.values(data);
+            const placeholders = columns.map((_, i) => databaseManager.getPlaceholder(i + 1)).join(', ');
+            const colList = columns.map(c => `"${c}"`).join(', ');
+            const sql = `INSERT INTO "${tableName}" (${colList}) VALUES (${placeholders})`;
+            const result = await databaseManager.executeRaw(sql, values);
+            return { code: 0, changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
+    });
+
+    router.put('/db/table/:name/row', async ({ params, body }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        const b = body as any;
+        const data = b?.data;
+        const where = b?.where;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        if (!data || typeof data !== 'object') {
+            return error(400, { code: 400, message: 'data object is required' });
+        }
+        if (!where || typeof where !== 'object') {
+            return error(400, { code: 400, message: 'where object is required' });
+        }
+
+        try {
+            const setClauses: string[] = [];
+            const values: unknown[] = [];
+            let paramIdx = 1;
+            for (const [key, value] of Object.entries(data)) {
+                setClauses.push(`"${key}" = ${databaseManager.getPlaceholder(paramIdx++)}`);
+                values.push(value);
+            }
+            const whereClauses: string[] = [];
+            for (const [key, value] of Object.entries(where)) {
+                whereClauses.push(`"${key}" = ${databaseManager.getPlaceholder(paramIdx++)}`);
+                values.push(value);
+            }
+            const sql = `UPDATE "${tableName}" SET ${setClauses.join(', ')} WHERE ${whereClauses.join(' AND ')}`;
+            const result = await databaseManager.executeRaw(sql, values);
+            return { code: 0, changes: result.changes };
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
+    });
+
+    router.delete('/db/table/:name/row', async ({ params, body }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        const where = (body as any)?.where;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        if (!where || typeof where !== 'object' || Object.keys(where).length === 0) {
+            return error(400, { code: 400, message: 'where object with at least one condition is required' });
+        }
+
+        try {
+            const whereClauses: string[] = [];
+            const values: unknown[] = [];
+            let paramIdx = 1;
+            for (const [key, value] of Object.entries(where)) {
+                whereClauses.push(`"${key}" = ${databaseManager.getPlaceholder(paramIdx++)}`);
+                values.push(value);
+            }
+            const sql = `DELETE FROM "${tableName}" WHERE ${whereClauses.join(' AND ')}`;
+            const result = await databaseManager.executeRaw(sql, values);
+            return { code: 0, changes: result.changes };
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
+    });
+
+    router.post('/db/table/:name/create', async ({ params, body }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        const b = body as any;
+        const columns = b?.columns;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+        if (!columns || !Array.isArray(columns)) {
+            return error(400, { code: 400, message: 'columns array is required' });
+        }
+
+        try {
+            const columnDefs = columns.map((col: any) => {
+                let def = `"${col.name}" ${col.type || 'TEXT'}`;
+                if (col.primaryKey) def += ' PRIMARY KEY';
+                if (col.autoIncrement) {
+                    def += databaseManager.getEngineType() === 'sqlite' ? ' AUTOINCREMENT' : '';
+                }
+                if (col.notNull) def += ' NOT NULL';
+                if (col.unique) def += ' UNIQUE';
+                if (col.defaultValue !== undefined && col.defaultValue !== null) {
+                    def += ` DEFAULT ${typeof col.defaultValue === 'string' ? `'${col.defaultValue}'` : col.defaultValue}`;
+                }
+                return def;
+            });
+            const sql = `CREATE TABLE IF NOT EXISTS "${tableName}" (\n  ${columnDefs.join(',\n  ')}\n)`;
+            await databaseManager.executeRaw(sql);
+            return { code: 0, message: `table "${tableName}" created` };
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
+    });
+
+    router.post('/db/table/:name/drop', async ({ params }) => {
+        if (!databaseManager.isInitialized()) {
+            return error(503, { code: 503, message: 'database not initialized' });
+        }
+        const tableName = (params as any).name;
+        if (!tableName) {
+            return error(400, { code: 400, message: 'table name is required' });
+        }
+
+        try {
+            const sql = `DROP TABLE IF EXISTS "${tableName}"`;
+            await databaseManager.executeRaw(sql);
+            return { code: 0, message: `table "${tableName}" dropped` };
+        } catch (e: any) {
+            return error(400, { code: 400, message: e.message || String(e) });
+        }
     });
 
     return router;

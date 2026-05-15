@@ -61,7 +61,7 @@
 </template>
 
 <script setup lang="js">
-import { LogIn, AppsSharp, Albums, People, ExtensionPuzzle, ChatbubblesSharp, TerminalSharp } from "@vicons/ionicons5";
+import { LogIn, AppsSharp, Albums, People, ExtensionPuzzle, ChatbubblesSharp, TerminalSharp, ServerSharp } from "@vicons/ionicons5";
 import { ref, h, onMounted, computed } from "vue";
 import { useStore } from "vuex";
 import TopBar from '../components/TopBar.vue';
@@ -121,6 +121,14 @@ const menuOptions = [
     },
   },
   {
+    label: "数据库",
+    key: "database",
+    icon: ServerSharp,
+    onClick: () => {
+      router.push("/dashboard/database");
+    },
+  },
+  {
     label: "登录",
     key: "login",
     icon: LogIn,
@@ -133,7 +141,7 @@ const menuOptions = [
 const filteredMenuOptions = computed(() => {
   const token = store.getters.token;
   return menuOptions.filter(option => {
-    if (!token && ['overview', 'plugins', 'bots', 'adapters', 'messages', 'commands'].includes(option.key)) return false;
+    if (!token && ['overview', 'plugins', 'bots', 'adapters', 'messages', 'commands', 'database'].includes(option.key)) return false;
     if (token && option.key === 'login') {
       return false;
     }
