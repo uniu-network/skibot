@@ -1,9 +1,6 @@
 # SkiBot
 ✨ A simple, easy to get started based on NodeJS and Onebot-V11 protocol Bot Framework✨ 
-> [!WARNING]
-> To run this project, please make sure your node version >= 20.
->
-> This project is just an open-source framework that I am using; it may not meet everyone's needs.
+
 ## ⚙️ Run
 ### by source code
 
