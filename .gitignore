@@ -13,9 +13,10 @@ config/config.yml
 plugins/*/
 plugins/*.*
 !plugins/help/
-!plugins/help/*
+!plugins/help/**
 !plugins/about/
-!plugins/about/*
+!plugins/about/**
+plugins/**/*.js
 
 **/config.json
 config/bots/*.yml
