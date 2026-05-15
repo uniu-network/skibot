@@ -9,7 +9,7 @@ async function bootstrap(): Promise<void> {
 
     logger.info(`booting skibot v${runtime.version}`);
 
-    startServer(runtime);
+    await startServer(runtime);
 
     await runtime.botManager.loadAll();
 
