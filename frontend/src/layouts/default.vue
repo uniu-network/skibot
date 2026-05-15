@@ -24,6 +24,7 @@
             :render-label="renderMenuLabel"
             :render-icon="renderMenuIcon"
             :expand-icon="expandIcon"
+            :value="currentRouteKey"
             :style="{ width: collapsed ? '64px' : '240px' }"
           />
         </n-layout-sider>
@@ -46,6 +47,7 @@
             :render-label="renderMenuLabel"
             :render-icon="renderMenuIcon"
             :expand-icon="expandIcon"
+            :value="currentRouteKey"
             :style="{ width: collapsed ? '64px' : '240px' }"
           />
         </n-layout-sider>
@@ -61,15 +63,40 @@
 </template>
 
 <script setup lang="js">
-import { LogIn, AppsSharp, Albums, People, ExtensionPuzzle, ChatbubblesSharp, TerminalSharp, ServerSharp } from "@vicons/ionicons5";
+import {
+  LogIn,
+  AppsSharp,
+  Albums,
+  People,
+  ExtensionPuzzle,
+  ChatbubblesSharp,
+  TerminalSharp,
+  ServerSharp,
+  DocumentTextSharp,
+} from "@vicons/ionicons5";
 import { ref, h, onMounted, computed } from "vue";
 import { useStore } from "vuex";
-import TopBar from '../components/TopBar.vue';
-import router from '../router';
+import { useRoute } from "vue-router";
+import TopBar from "../components/TopBar.vue";
+import router from "../router";
 
 const store = useStore();
 const collapsed = ref(true);
 const isphone = computed(() => store.state.isphone);
+const route = useRoute();
+
+const currentRouteKey = computed(() => {
+  const path = route.path;
+  if (path.includes("/plugins")) return "plugins";
+  if (path.includes("/bots")) return "bots";
+  if (path.includes("/adapters")) return "adapters";
+  if (path.includes("/messages")) return "messages";
+  if (path.includes("/commands")) return "commands";
+  if (path.includes("/database")) return "database";
+  if (path.includes("/logs")) return "logs";
+  if (path.includes("/auth/login")) return "login";
+  return "overview";
+});
 
 const menuOptions = [
   {
@@ -129,20 +156,41 @@ const menuOptions = [
     },
   },
   {
+    label: "运行日志",
+    key: "logs",
+    icon: DocumentTextSharp,
+    onClick: () => {
+      router.push("/dashboard/logs");
+    },
+  },
+  {
     label: "登录",
     key: "login",
     icon: LogIn,
     onClick: () => {
-      router.push('/dashboard/auth/login');
+      router.push("/dashboard/auth/login");
     },
   },
 ];
 
 const filteredMenuOptions = computed(() => {
   const token = store.getters.token;
-  return menuOptions.filter(option => {
-    if (!token && ['overview', 'plugins', 'bots', 'adapters', 'messages', 'commands', 'database'].includes(option.key)) return false;
-    if (token && option.key === 'login') {
+  return menuOptions.filter((option) => {
+    if (
+      !token &&
+      [
+        "overview",
+        "plugins",
+        "bots",
+        "adapters",
+        "messages",
+        "commands",
+        "database",
+        "logs",
+      ].includes(option.key)
+    )
+      return false;
+    if (token && option.key === "login") {
       return false;
     }
     return true;
@@ -152,7 +200,7 @@ const filteredMenuOptions = computed(() => {
 function IsPhone() {
   const info = navigator.userAgent;
   const isPhone = /mobile/i.test(info);
-  store.commit('setIsphone', isPhone);
+  store.commit("setIsphone", isPhone);
   return isPhone;
 }
 
@@ -168,13 +216,16 @@ function renderMenuIcon(option) {
 }
 
 function expandIcon() {
-  return h('span', '▶');
+  return h("span", "▶");
 }
 
 onMounted(() => {
   IsPhone();
-  if (!store.getters.token && !window.location.pathname.startsWith('/dashboard/auth')) {
-    router.push('/dashboard/auth/login');
+  if (
+    !store.getters.token &&
+    !window.location.pathname.startsWith("/dashboard/auth")
+  ) {
+    router.push("/dashboard/auth/login");
   }
 });
 </script>
