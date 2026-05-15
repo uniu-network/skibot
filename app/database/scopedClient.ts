@@ -340,4 +340,57 @@ export class ScopedDatabaseClientImpl implements ScopedDatabaseClient {
       return result.length > 0;
     }
   }
+
+  async deleteWhereLessThan(
+    table: string,
+    column: string,
+    value: unknown,
+  ): Promise<number> {
+    const fullName = this.getFullTableName(table);
+    const ph = this.driver.getPlaceholder(1);
+    const sql = `DELETE FROM "${fullName}" WHERE "${column}" < ${ph}`;
+    const result = await this.driver.run(sql, [value]);
+    return result.changes;
+  }
+
+  async countWhereGreaterThanOrEqual(
+    table: string,
+    column: string,
+    value: unknown,
+  ): Promise<number> {
+    const fullName = this.getFullTableName(table);
+    const ph = this.driver.getPlaceholder(1);
+    const sql = `SELECT COUNT(*) AS cnt FROM "${fullName}" WHERE "${column}" >= ${ph}`;
+    const result = await this.driver.query<{ cnt: number }>(sql, [value]);
+    return result[0]?.cnt ?? 0;
+  }
+
+  async countWhereLessThan(
+    table: string,
+    column: string,
+    value: unknown,
+  ): Promise<number> {
+    const fullName = this.getFullTableName(table);
+    const ph = this.driver.getPlaceholder(1);
+    const sql = `SELECT COUNT(*) AS cnt FROM "${fullName}" WHERE "${column}" < ${ph}`;
+    const result = await this.driver.query<{ cnt: number }>(sql, [value]);
+    return result[0]?.cnt ?? 0;
+  }
+
+  async countWhereBetween(
+    table: string,
+    column: string,
+    startInclusive: unknown,
+    endExclusive: unknown,
+  ): Promise<number> {
+    const fullName = this.getFullTableName(table);
+    const startPh = this.driver.getPlaceholder(1);
+    const endPh = this.driver.getPlaceholder(2);
+    const sql = `SELECT COUNT(*) AS cnt FROM "${fullName}" WHERE "${column}" >= ${startPh} AND "${column}" < ${endPh}`;
+    const result = await this.driver.query<{ cnt: number }>(sql, [
+      startInclusive,
+      endExclusive,
+    ]);
+    return result[0]?.cnt ?? 0;
+  }
 }

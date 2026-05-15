@@ -16,6 +16,9 @@ database:
     pool:
       min: 2
       max: 10
+  message_retention_days: 0
+  cleanup_time: "01:00"
+  timezone: ""
 
 # Bot configuration example (place in config/bots/<name>.yml):
 # self_id: 10001
