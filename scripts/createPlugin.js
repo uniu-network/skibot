@@ -63,8 +63,8 @@ import { MessageSegment } from '../../app/messages.js';
 
 export default class ${plugindata.name.replace(/-/g, '_')} extends BasePlugin {
 
-    @ConfigField({ type: 'boolean', default: true, description: 'Whether this feature is enabled' })
-    declare enabled: boolean;
+    @ConfigField({ type: 'string', default: 'Hello from plugin!', description: '示例回复内容' })
+    declare replyText: string;
 
     async onLoad(ctx: PluginContext): Promise<void> {
         ctx.bot.command('example', '示例指令', async (args: ParsedArgs, handler, msg, event) => {
@@ -75,7 +75,7 @@ export default class ${plugindata.name.replace(/-/g, '_')} extends BasePlugin {
             // Short flags:   -x         → args.x === true
             //    Combined:    -xyz       → args.x, args.y, args.z are true
             // Short KV:      -n foo     → args.n === 'foo'
-            msg.addMessage(MessageSegment.text('Hello from plugin!'));
+            msg.addMessage(MessageSegment.text(this.config.replyText));
             await handler.finish(msg);
         });
     }
