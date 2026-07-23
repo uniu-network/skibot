@@ -25,10 +25,15 @@ database:
 # prefix:
 #   - /
 #   - !
+# error_reply_enabled: true
 # adapters:
 #   - type: onebotHttp
 #     config:
 #       url: http://localhost:5700
+#       # Optional OneBot v11 HMAC-SHA1 secret for validating inbound reports.
+#       secret: ""
+#       # Optional OneBot v11 access token for outbound HTTP API requests.
+#       access_token: ""
 #   - type: webchat
 #     config:
 #       port: 8080

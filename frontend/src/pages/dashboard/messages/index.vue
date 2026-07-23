@@ -76,6 +76,8 @@ const total = ref(0);
 const currentPage = ref(1);
 const pageSize = ref(20);
 const filterType = ref<string>("");
+const detailVisible = ref(false);
+const detailContent = ref("");
 
 const typeOptions = [
   { label: "全部", value: "" },

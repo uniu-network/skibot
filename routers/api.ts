@@ -11,10 +11,17 @@ import { AdapterManager } from "../app/adapterManager.js";
 import databaseManager from "../app/database/manager.js";
 import {
   getLogBufferAfter,
+  setConfiguredLogLevel,
   subscribeToLogs,
   unsubscribeFromLogs,
 } from "../app/log.js";
 import type { LogEntry } from "../app/log.js";
+import {
+  getGlobalConfigField,
+  getGlobalConfigFields,
+  getGlobalConfigSections,
+  validateGlobalConfigUpdate,
+} from "../app/globalConfigSchema.js";
 
 interface ApiRoutesDeps {
   botManager: BotManager;
@@ -79,6 +86,57 @@ export function createApiRoutes(deps: ApiRoutesDeps): AnyElysia {
 
   router.get("/bots/list", () => botManager.listAllBots());
 
+  router.get("/config", () => ({
+    code: 0,
+    sections: getGlobalConfigSections(config),
+    fields: getGlobalConfigFields(config),
+  }));
+
+  router.post("/config", ({ body }) => {
+    const validation = validateGlobalConfigUpdate(body);
+    if (!validation.valid) {
+      return error(400, {
+        code: 400,
+        message: "invalid config update",
+        errors: validation.errors,
+      });
+    }
+
+    const applied: string[] = [];
+    const requiresRestart: string[] = [];
+
+    for (const [key, value] of Object.entries(validation.values)) {
+      config.set(key, value);
+      const field = getGlobalConfigField(key);
+      if (field?.hotReloadable) {
+        applied.push(key);
+      }
+      if (field?.restartRequired || !field?.hotReloadable) {
+        requiresRestart.push(key);
+      }
+
+      if (key === "log.level" && typeof value === "string") {
+        setConfiguredLogLevel(value);
+      }
+    }
+
+    return {
+      code: 0,
+      message: "config saved",
+      applied,
+      requiresRestart,
+      skipped: validation.skipped,
+    };
+  });
+
+  router.post("/system/restart", () => {
+    setTimeout(() => process.exit(0), 250);
+    return {
+      code: 0,
+      message: "restart scheduled; external process manager must restart the process",
+    };
+  });
+
   router.post("/bots/create", async ({ body, status }) => {
     const b = body as any;
     const botId = b?.botId;
@@ -87,11 +145,23 @@ export function createApiRoutes(deps: ApiRoutesDeps): AnyElysia {
     }
 
     try {
+      if (
+        b?.error_reply_enabled !== undefined &&
+        typeof b.error_reply_enabled !== "boolean"
+      ) {
+        return status(400, {
+          code: 400,
+          message: "error_reply_enabled must be a boolean",
+        });
+      }
+
       const prefix = normalizePrefix(b?.prefix);
       const instance = await botManager.createInstance(botId, {
         name: b?.name,
         self_id: b?.self_id,
         prefix,
+        error_reply_enabled: b?.error_reply_enabled,
+        admin: b?.admin,
         adapters: b?.adapters,
         plugin_config: b?.plugin_config,
       });
@@ -191,7 +261,15 @@ export function createApiRoutes(deps: ApiRoutesDeps): AnyElysia {
 
     const config = createBotConfig(botId);
     const configData: Record<string, any> = {};
-    const keys = ["name", "self_id", "prefix", "adapters", "plugin_config"];
+    const keys = [
+      "name",
+      "self_id",
+      "prefix",
+      "error_reply_enabled",
+      "admin",
+      "adapters",
+      "plugin_config",
+    ];
     for (const key of keys) {
       const val = config.get(key);
       if (val !== null) {
@@ -216,7 +294,17 @@ export function createApiRoutes(deps: ApiRoutesDeps): AnyElysia {
 
     const config = createBotConfig(botId);
     const body = ctx.body as any;
-    const allowedKeys = ["name", "self_id", "prefix"];
+    if (
+      body.error_reply_enabled !== undefined &&
+      typeof body.error_reply_enabled !== "boolean"
+    ) {
+      return error(400, {
+        code: 400,
+        message: "error_reply_enabled must be a boolean",
+      });
+    }
+
+    const allowedKeys = ["name", "self_id", "prefix", "error_reply_enabled", "admin"];
     const updated: Record<string, any> = {};
     for (const key of allowedKeys) {
       if (body[key] !== undefined) {

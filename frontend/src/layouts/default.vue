@@ -1,65 +1,61 @@
 <template>
-  <n-space vertical>
-    <n-layout>
-      <n-layout-header>
-        <TopBar />
-      </n-layout-header>
-      <n-layout has-sider>
-        <n-layout-sider
-          v-if="!isphone"
-          bordered
-          collapse-mode="width"
+  <n-layout class="layout-shell">
+    <n-layout-header>
+      <TopBar />
+    </n-layout-header>
+    <n-layout has-sider class="layout-body">
+      <n-layout-sider
+        v-if="!isphone"
+        bordered
+        collapse-mode="width"
+        :collapsed-width="64"
+        :width="240"
+        :collapsed="collapsed"
+        show-trigger
+        @collapse="collapsed = true"
+        @expand="collapsed = false"
+      >
+        <n-menu
+          :collapsed="collapsed"
           :collapsed-width="64"
-          :width="240"
+          :collapsed-icon-size="22"
+          :options="filteredMenuOptions"
+          :render-label="renderMenuLabel"
+          :render-icon="renderMenuIcon"
+          :expand-icon="expandIcon"
+          :value="currentRouteKey"
+          :style="{ width: collapsed ? '64px' : '240px', height: '100%', overflowY: 'auto' }"
+        />
+      </n-layout-sider>
+      <n-layout-sider
+        v-else
+        bordered
+        collapse-mode="width"
+        :collapsed-width="10"
+        :width="240"
+        :collapsed="collapsed"
+        show-trigger
+        @collapse="collapsed = true"
+        @expand="collapsed = false"
+      >
+        <n-menu
           :collapsed="collapsed"
-          show-trigger
-          @collapse="collapsed = true"
-          @expand="collapsed = false"
-        >
-          <n-menu
-            :collapsed="collapsed"
-            :collapsed-width="64"
-            :collapsed-icon-size="22"
-            :options="filteredMenuOptions"
-            :render-label="renderMenuLabel"
-            :render-icon="renderMenuIcon"
-            :expand-icon="expandIcon"
-            :value="currentRouteKey"
-            :style="{ width: collapsed ? '64px' : '240px' }"
-          />
-        </n-layout-sider>
-        <n-layout-sider
-          v-else
-          bordered
-          collapse-mode="width"
-          :collapsed-width="10"
-          :width="240"
-          :collapsed="collapsed"
-          show-trigger
-          @collapse="collapsed = true"
-          @expand="collapsed = false"
-        >
-          <n-menu
-            :collapsed="collapsed"
-            :collapsed-width="64"
-            :collapsed-icon-size="22"
-            :options="filteredMenuOptions"
-            :render-label="renderMenuLabel"
-            :render-icon="renderMenuIcon"
-            :expand-icon="expandIcon"
-            :value="currentRouteKey"
-            :style="{ width: collapsed ? '64px' : '240px' }"
-          />
-        </n-layout-sider>
+          :collapsed-width="64"
+          :collapsed-icon-size="22"
+          :options="filteredMenuOptions"
+          :render-label="renderMenuLabel"
+          :render-icon="renderMenuIcon"
+          :expand-icon="expandIcon"
+          :value="currentRouteKey"
+          :style="{ width: collapsed ? '64px' : '240px', height: '100%', overflowY: 'auto' }"
+        />
+      </n-layout-sider>
 
-        <n-layout>
-          <span>
-            <router-view />
-          </span>
-        </n-layout>
+      <n-layout class="layout-content">
+        <router-view />
       </n-layout>
     </n-layout>
-  </n-space>
+  </n-layout>
 </template>
 
 <script setup lang="js">
@@ -73,6 +69,7 @@ import {
   TerminalSharp,
   ServerSharp,
   DocumentTextSharp,
+  SettingsSharp,
 } from "@vicons/ionicons5";
 import { ref, h, onMounted, computed } from "vue";
 import { useStore } from "vuex";
@@ -94,6 +91,7 @@ const currentRouteKey = computed(() => {
   if (path.includes("/commands")) return "commands";
   if (path.includes("/database")) return "database";
   if (path.includes("/logs")) return "logs";
+  if (path.includes("/settings")) return "settings";
   if (path.includes("/auth/login")) return "login";
   return "overview";
 });
@@ -110,7 +108,7 @@ const menuOptions = [
   {
     label: "插件管理",
     key: "plugins",
-    icon: Albums,
+    icon: ExtensionPuzzle,
     onClick: () => {
       router.push("/dashboard/plugins");
     },
@@ -126,7 +124,7 @@ const menuOptions = [
   {
     label: "适配器管理",
     key: "adapters",
-    icon: ExtensionPuzzle,
+    icon: Albums,
     onClick: () => {
       router.push("/dashboard/adapters");
     },
@@ -164,6 +162,14 @@ const menuOptions = [
     },
   },
   {
+    label: "系统设置",
+    key: "settings",
+    icon: SettingsSharp,
+    onClick: () => {
+      router.push("/dashboard/settings");
+    },
+  },
+  {
     label: "登录",
     key: "login",
     icon: LogIn,
@@ -187,6 +193,7 @@ const filteredMenuOptions = computed(() => {
         "commands",
         "database",
         "logs",
+        "settings",
       ].includes(option.key)
     )
       return false;
@@ -229,3 +236,25 @@ onMounted(() => {
   }
 });
 </script>
+
+<style scoped>
+.layout-shell {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.layout-body :deep(.n-layout-sider) {
+  overflow: hidden;
+}
+
+.layout-content {
+  overflow-y: auto;
+}
+</style>
