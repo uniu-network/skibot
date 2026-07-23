@@ -1,7 +1,9 @@
 import type { ISendMessage } from "./types.js";
+import type { SkiUserRole } from "./roles.js";
 
 export type MessageSender<TExtra extends object = {}> = {
   user_id: number;
+  ski_user_role: SkiUserRole;
   nickname?: string;
   sex?: string;
   age?: number;

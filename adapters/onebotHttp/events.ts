@@ -2,6 +2,7 @@ import { BotEvent, BotMessageEvent, GroupMessageEvent, PrivateMessageEvent, Noti
 import type { MessageSender } from '../../app/events.js';
 import type { ISendMessage } from '../../app/types.js';
 import { Message, MessageSegment } from '../../app/messages.js';
+import { getSkiBotUserRole } from './utils.js';
 
 export type OneBotAdapterId = 'onebotHttp';
 
@@ -107,7 +108,10 @@ export function matchEvents(eventData: any, adapterId: OneBotAdapterId, adapter:
 
     const time = eventData.time;
     const selfId = eventData.self_id;
-    const sender: OneBotSender = eventData.sender;
+    const sender: OneBotSender = {
+        ...eventData.sender,
+        ski_user_role: getSkiBotUserRole(eventData.sender?.role),
+    };
     const message = eventData.message;
 
     const parsedMessage = MessageSegment.fromJson(message || []);

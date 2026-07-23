@@ -10,6 +10,18 @@ import logger from "./log.js";
 import { IAdapter, IHandler, AdapterContext } from "./types.js";
 import async from "async";
 import { parseArgs, type ParsedArgs } from "./argParser.js";
+import { SkiUserRole, type SkiUserRole as SkiUserRoleType } from "./roles.js";
+
+export interface CommandOptions {
+  requireRole?: SkiUserRoleType;
+}
+
+export interface CommandRegistryEntry {
+  command: string;
+  description: string;
+  scope?: string;
+  requireRole: SkiUserRoleType;
+}
 
 export function normalizePrefix(
   prefix: string | string[] | undefined,
@@ -101,18 +113,27 @@ export class Handler implements IHandler {
 export class Bot {
   public self_id: number;
   public prefix: string[];
+  public error_reply_enabled: boolean;
+  public admins: string[];
   private adapters: Map<string, IAdapter> = new Map();
   private eventHandlers: Map<
     string,
     Array<{ callback: Function; scope?: string }>
   > = new Map();
   private eventQueue: Array<{ eventName: string; event: BotEvent }> = [];
-  public commands: Array<any>;
+  public commands: CommandRegistryEntry[];
   private currentScope: string | null = null;
 
-  constructor(self_id: number, prefix: string | string[] = ["/"]) {
+  constructor(
+    self_id: number,
+    prefix: string | string[] = ["/"],
+    error_reply_enabled = true,
+    admins: string[] = [],
+  ) {
     this.self_id = self_id;
     this.prefix = normalizePrefix(prefix);
+    this.error_reply_enabled = error_reply_enabled;
+    this.admins = admins;
     this.commands = [];
     this.startEventLoop();
     BOTS[self_id] = this;
@@ -151,11 +172,17 @@ export class Bot {
     this.eventQueue.push({ eventName, event });
   }
 
-  registerCommand(command: string, description: string, scope?: string) {
+  registerCommand(
+    command: string,
+    description: string,
+    scope?: string,
+    requireRole: SkiUserRoleType = SkiUserRole.USER,
+  ) {
     const data = {
       command: command,
       description: description,
       scope: scope || this.currentScope || undefined,
+      requireRole,
     };
     if (this.commands.some((cmd) => cmd.command === command)) {
       throw new Error("Command already registered");
@@ -216,8 +243,10 @@ export class Bot {
       reply_msg: Message,
       event: BotMessageEvent,
     ) => void,
+    options: CommandOptions = {},
   ) {
-    this.registerCommand(command, description);
+    const requireRole = options.requireRole ?? SkiUserRole.USER;
+    this.registerCommand(command, description, undefined, requireRole);
 
     const handler = async (event: any, handlerObj: any, reply_msg: any) => {
       const prefixes = this.prefix;
@@ -227,6 +256,14 @@ export class Bot {
       );
       const match = regex.exec(event.raw_message);
       if (match) {
+        const effectiveRole = this.getEffectiveRole(event);
+        event.sender.ski_user_role = effectiveRole;
+        if (effectiveRole < requireRole) {
+          const message = new Message();
+          message.addMessage(MessageSegment.text("无足够权限执行指令"));
+          await handlerObj.finish(message);
+          return;
+        }
         const rawArgs = match[1] ? match[1].split(/\s+/) : [];
         const args = parseArgs(rawArgs);
         try {
@@ -244,7 +281,21 @@ export class Bot {
     this.on("message", handler);
   }
 
+  private getEffectiveRole(event: BotMessageEvent): SkiUserRoleType {
+    const senderRole = event.sender.ski_user_role ?? SkiUserRole.USER;
+    const adminKey = `${event.adapter_id}:${event.sender.user_id}`;
+    if (this.admins.includes(adminKey)) {
+      return Math.max(senderRole, SkiUserRole.BOT_ADMIN) as SkiUserRoleType;
+    }
+    return senderRole;
+  }
+
   private async handleError(error: Error, event: BotEvent) {
+    if (!this.error_reply_enabled) {
+      logger.error(`error handling ${event.constructor.name} event: ${error}`);
+      return;
+    }
+
     const message = new Message();
     const handler = new Handler(event, this);
     message.addMessage(
@@ -255,7 +306,9 @@ export class Bot {
     try {
       await handler.finish(message);
     } catch (e) {
-      // FinishSignal is expected from finish()
+      if (!(e instanceof FinishSignal)) {
+        throw e;
+      }
     }
   }
 
