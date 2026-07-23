@@ -2,7 +2,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IAdapter, ISendMessage, AdapterContext } from '../../app/types.js';
 import { Message, MessageSegment } from '../../app/messages.js';
-import { PrivateMessageEvent } from '../../app/events.js';
+import { GroupMessageEvent, PrivateMessageEvent } from '../../app/events.js';
 import type { WebChatSender } from './events.js';
 import logger from '../../app/log.js';
 import { getFrontendHtml, getFrontendFile } from './frontend.js';
@@ -10,7 +10,11 @@ import { getFrontendHtml, getFrontendFile } from './frontend.js';
 interface WebChatClient {
     userId: number;
     ws: WebSocket;
+    mode: 'private' | 'group';
+    groupId: number;
 }
+
+const DEFAULT_GROUP_ID = 10000;
 
 const CONTENT_TYPES: Record<string, string> = {
     '.html': 'text/html; charset=utf-8',
@@ -72,14 +76,26 @@ export default class WebChatAdapter implements IAdapter, ISendMessage {
 
         this.wss.on('connection', (ws) => {
             const userId = ++this.userCounter;
-            const client: WebChatClient = { userId, ws };
+            const client: WebChatClient = { userId, ws, mode: 'private', groupId: DEFAULT_GROUP_ID };
             this.clients.set(userId, client);
 
-            ws.send(JSON.stringify({ type: 'connected', userId }));
+            ws.send(JSON.stringify({
+                type: 'connected',
+                userId,
+                defaultGroupId: DEFAULT_GROUP_ID,
+            }));
 
             ws.on('message', (data) => {
                 try {
                     const msg = JSON.parse(data.toString());
+                    if (msg.type === 'context') {
+                        const mode = msg.mode === 'group' || msg.message_type === 'group' ? 'group' : 'private';
+                        const parsedGroupId = Number(msg.groupId ?? msg.group_id ?? client.groupId ?? DEFAULT_GROUP_ID);
+                        client.mode = mode;
+                        client.groupId = Number.isFinite(parsedGroupId) && parsedGroupId > 0 ? parsedGroupId : DEFAULT_GROUP_ID;
+                        return;
+                    }
+
                     if (msg.type === 'message' && this.ctx) {
                         const message = Message.build();
 
@@ -114,17 +130,44 @@ export default class WebChatAdapter implements IAdapter, ISendMessage {
                             return acc;
                         }, '');
 
-                        const event = new PrivateMessageEvent(
-                            Math.floor(Date.now() / 1000),
-                            this.ctx.bot.self_id,
-                            this.id,
-                            this,
-                            `web_${Date.now()}`,
-                            message,
-                            rawText,
-                            { user_id: userId } as WebChatSender,
-                            userId
-                        );
+                        const mode = msg.mode === 'group' || msg.message_type === 'group' ? 'group' : 'private';
+                        const parsedGroupId = Number(msg.groupId ?? msg.group_id ?? client.groupId ?? DEFAULT_GROUP_ID);
+                        const groupId = Number.isFinite(parsedGroupId) && parsedGroupId > 0 ? parsedGroupId : DEFAULT_GROUP_ID;
+                        const sender: WebChatSender = {
+                            user_id: userId,
+                            ski_user_role: 0,
+                            nickname: String(msg.nickname || `Web User ${userId}`),
+                            display_name: String(msg.nickname || `Web User ${userId}`),
+                            session_id: mode === 'group' ? `group:${groupId}` : `private:${userId}`,
+                        };
+
+                        client.mode = mode;
+                        client.groupId = groupId;
+
+                        const event = mode === 'group'
+                            ? new GroupMessageEvent(
+                                Math.floor(Date.now() / 1000),
+                                this.ctx.bot.self_id,
+                                this.id,
+                                this,
+                                `web_group_${groupId}_${Date.now()}`,
+                                message,
+                                rawText,
+                                sender,
+                                groupId,
+                                userId
+                            )
+                            : new PrivateMessageEvent(
+                                Math.floor(Date.now() / 1000),
+                                this.ctx.bot.self_id,
+                                this.id,
+                                this,
+                                `web_private_${userId}_${Date.now()}`,
+                                message,
+                                rawText,
+                                sender,
+                                userId
+                            );
                         this.ctx.emitEvent('message', event);
                     }
                 } catch (e) {
@@ -186,12 +229,46 @@ export default class WebChatAdapter implements IAdapter, ISendMessage {
 
         client.ws.send(JSON.stringify({
             type: 'reply',
+            messageType: 'private',
+            userId,
             content: text,
             segments,
+            time: Date.now() / 1000,
         }));
     }
 
     async send_group_msg(target_id: string | number, message: Message): Promise<void> {
-        logger.warn('[WebChat] send_group_msg is not supported in WebChat adapter');
+        const groupId = Number(target_id);
+        if (!Number.isFinite(groupId)) {
+            logger.warn(`[WebChat] Invalid group id: ${target_id}`);
+            return;
+        }
+
+        const segments = message.json();
+        const text = message.reduce((acc, seg) => {
+            if (seg.type === 'text') return acc + String(seg.data.text || '');
+            if (seg.type === 'at') return acc + '@' + String(seg.data.user_id || '');
+            return acc;
+        }, '');
+
+        let delivered = 0;
+        for (const [, client] of this.clients) {
+            if (client.mode !== 'group' || client.groupId !== groupId) continue;
+            if (client.ws.readyState !== WebSocket.OPEN) continue;
+
+            client.ws.send(JSON.stringify({
+                type: 'reply',
+                messageType: 'group',
+                groupId,
+                content: text,
+                segments,
+                time: Date.now() / 1000,
+            }));
+            delivered++;
+        }
+
+        if (delivered === 0) {
+            logger.warn(`[WebChat] No connected clients in group ${groupId}`);
+        }
     }
 }

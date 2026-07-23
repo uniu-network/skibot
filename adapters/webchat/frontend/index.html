@@ -7,28 +7,62 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="header">
-    <h1>WebChat</h1>
-    <div class="header-actions">
-        <button id="file-btn" class="icon-btn" title="Send image/file">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-        </button>
-        <input type="file" id="file-input" accept="image/*,audio/*" style="display:none">
-        <div id="status" class="status disconnected" title="Disconnected"></div>
-    </div>
-</div>
-<div id="chat-container"></div>
+<main class="shell">
+    <section class="chat-card">
+        <div class="header">
+            <div class="brand">
+                <span class="brand-mark">SK</span>
+                <div>
+                    <p class="eyebrow">Adapter Console</p>
+                    <h1>WebChat</h1>
+                </div>
+            </div>
+            <div class="header-actions">
+                <label class="mode-switch" aria-label="Chat mode">
+                    <input type="radio" name="chat-mode" value="private" checked>
+                    <span>私聊</span>
+                </label>
+                <label class="mode-switch" aria-label="Group chat mode">
+                    <input type="radio" name="chat-mode" value="group">
+                    <span>群聊</span>
+                </label>
+                <label class="group-field" for="group-id-input">
+                    <span>Group</span>
+                    <input id="group-id-input" type="number" min="1" value="10000" disabled>
+                </label>
+                <button id="file-btn" class="icon-btn" title="发送图片/文件" aria-label="发送图片或文件">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                </button>
+                <input type="file" id="file-input" accept="image/*,audio/*" hidden>
+                <div id="status" class="status disconnected" title="Disconnected"></div>
+            </div>
+        </div>
+
+        <div class="context-bar">
+            <div>
+                <span class="context-label">当前会话</span>
+                <strong id="context-title">私聊</strong>
+            </div>
+            <span id="identity" class="identity">未连接</span>
+        </div>
+
+        <div id="chat-container" aria-live="polite"></div>
+
+        <div id="upload-preview" class="upload-preview hidden">
+            <span class="upload-preview-name"></span>
+            <button id="cancel-upload" class="cancel-upload" aria-label="取消上传">&times;</button>
+        </div>
+
+        <div class="input-area">
+            <textarea id="msg-input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行" disabled></textarea>
+            <button id="send-btn" disabled>发送</button>
+        </div>
+    </section>
+</main>
+
 <div id="image-preview" class="image-preview hidden">
     <img id="preview-img" src="" alt="Preview">
-    <span id="preview-close" class="preview-close">&times;</span>
-</div>
-<div id="upload-preview" class="upload-preview hidden">
-    <span class="upload-preview-name"></span>
-    <button id="cancel-upload" class="cancel-upload">&times;</button>
-</div>
-<div class="input-area">
-    <textarea id="msg-input" rows="1" placeholder="Type a message... (paste image URL to send image)" disabled></textarea>
-    <button id="send-btn" disabled>Send</button>
+    <button id="preview-close" class="preview-close" aria-label="关闭预览">&times;</button>
 </div>
 <script src="/app.js"></script>
 </body>

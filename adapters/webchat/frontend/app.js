@@ -11,12 +11,21 @@ const imagePreview = document.getElementById('image-preview');
 const previewImg = document.getElementById('preview-img');
 const previewClose = document.getElementById('preview-close');
 const uploadPreview = document.getElementById('upload-preview');
-const cancelUpload = document.getElementById('cancel-upload');
+const groupInput = document.getElementById('group-id-input');
+const contextTitle = document.getElementById('context-title');
+const identity = document.getElementById('identity');
+const modeInputs = Array.prototype.slice.call(document.querySelectorAll('input[name="chat-mode"]'));
 
 let ws = null;
 let myUserId = null;
 let reconnectTimer = null;
 let pendingUpload = null;
+let currentMode = 'private';
+
+function currentGroupId() {
+    var value = Number(groupInput.value || 10000);
+    return Number.isFinite(value) && value > 0 ? value : 10000;
+}
 
 function formatTime(ts) {
     const d = new Date(typeof ts === 'number' ? ts * 1000 : Date.now());
@@ -27,6 +36,31 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function contextLabel(messageType, groupId) {
+    return messageType === 'group' ? '群聊 #' + groupId : '私聊';
+}
+
+function updateContext() {
+    groupInput.disabled = currentMode !== 'group';
+    contextTitle.textContent = currentMode === 'group' ? '群聊 #' + currentGroupId() : '私聊';
+    msgInput.placeholder = currentMode === 'group'
+        ? '发送到群聊 #' + currentGroupId() + '，Enter 发送'
+        : '发送私聊消息，Enter 发送';
+    syncContext();
+}
+
+function syncContext() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    var groupId = currentGroupId();
+    ws.send(JSON.stringify({
+        type: 'context',
+        mode: currentMode,
+        message_type: currentMode,
+        groupId: groupId,
+        group_id: groupId
+    }));
 }
 
 function renderSegment(seg) {
@@ -50,7 +84,6 @@ function renderSegment(seg) {
                 fallback.href = img.src;
                 fallback.target = '_blank';
                 fallback.textContent = '[Image: ' + (seg.data.file || 'link') + ']';
-                fallback.style.color = '#7c7cff';
                 div.innerHTML = '';
                 div.appendChild(fallback);
             };
@@ -81,15 +114,13 @@ function renderSegment(seg) {
             if (seg.data && seg.data.platform === 'webchat') {
                 renderWebchatSegment(div, seg.data.type, seg.data.data);
             } else {
-                div.className = 'msg-segment text';
+                div.className = 'msg-segment muted';
                 div.textContent = '[unsupported: ' + seg.type + ']';
-                div.style.color = '#888';
             }
             break;
         default:
-            div.className = 'msg-segment text';
-            div.textContent = seg.data.text || seg.data.content || '';
-            div.style.color = '#888';
+            div.className = 'msg-segment muted';
+            div.textContent = seg.data.text || seg.data.content || '[' + seg.type + ']';
     }
     return div;
 }
@@ -107,7 +138,7 @@ function renderWebchatSegment(container, type, data) {
                 imagePreview.classList.remove('hidden');
             };
             img.onerror = function() {
-                container.innerHTML = '<a href="' + img.src + '" target="_blank" style="color:#7c7cff">[Image]</a>';
+                container.innerHTML = '<a href="' + img.src + '" target="_blank">[Image]</a>';
             };
             container.appendChild(img);
             break;
@@ -122,9 +153,6 @@ function renderWebchatSegment(container, type, data) {
         case 'video':
             var video = document.createElement('video');
             video.controls = true;
-            video.style.maxWidth = '240px';
-            video.style.maxHeight = '240px';
-            video.style.borderRadius = '8px';
             video.src = (data || {}).file || (data || {}).url || '';
             container.appendChild(video);
             break;
@@ -132,28 +160,36 @@ function renderWebchatSegment(container, type, data) {
             var link = document.createElement('a');
             link.href = (data || {}).url || (data || {}).file || '';
             link.target = '_blank';
-            link.style.color = '#7c7cff';
             link.textContent = '[File: ' + ((data || {}).name || 'download') + ']';
             container.appendChild(link);
             break;
         default:
-            container.classList.add('text');
+            container.classList.add('muted');
             container.textContent = '[webchat:' + type + ']';
-            container.style.color = '#888';
     }
 }
 
 function appendMessage(type, content, extra) {
     extra = extra || {};
     var div = document.createElement('div');
+    var messageType = extra.messageType || currentMode;
+    var groupId = extra.groupId || currentGroupId();
     div.className = 'msg ' + type;
+    div.dataset.context = messageType === 'group' ? 'group:' + groupId : 'private';
 
-    if (extra.sender) {
-        var sender = document.createElement('div');
-        sender.className = 'sender';
-        sender.textContent = extra.sender;
-        div.appendChild(sender);
-    }
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+
+    var sender = document.createElement('span');
+    sender.className = 'sender';
+    sender.textContent = extra.sender || (type === 'user' ? 'You' : 'Bot');
+    meta.appendChild(sender);
+
+    var badge = document.createElement('span');
+    badge.className = 'context-badge';
+    badge.textContent = contextLabel(messageType, groupId);
+    meta.appendChild(badge);
+    div.appendChild(meta);
 
     if (extra.segments && extra.segments.length > 0) {
         for (var i = 0; i < extra.segments.length; i++) {
@@ -205,19 +241,29 @@ function sendMessage() {
     var segments = buildSegmentsFromInput();
     if (segments.length === 0 || !ws || ws.readyState !== WebSocket.OPEN) return;
 
-    ws.send(JSON.stringify({ type: 'message', segments: segments }));
+    var groupId = currentGroupId();
+    ws.send(JSON.stringify({
+        type: 'message',
+        mode: currentMode,
+        message_type: currentMode,
+        groupId: groupId,
+        group_id: groupId,
+        segments: segments
+    }));
 
-    msgInput.focus();
     var content = msgInput.value.trim();
     appendMessage('user', content, {
-        sender: 'You',
+        sender: 'You #' + (myUserId || '-'),
         time: Date.now() / 1000,
-        segments: segments
+        segments: segments,
+        messageType: currentMode,
+        groupId: groupId
     });
 
     msgInput.value = '';
     msgInput.style.height = 'auto';
     clearPendingUpload();
+    msgInput.focus();
 }
 
 function clearPendingUpload() {
@@ -243,7 +289,7 @@ function handleFileSelect(file) {
         }
         uploadPreview.innerHTML = previewContent +
             '<span class="upload-preview-name">' + file.name + ' (' + formatFileSize(file.size) + ')</span>' +
-            '<button id="cancel-upload" class="cancel-upload">&times;</button>';
+            '<button id="cancel-upload" class="cancel-upload" aria-label="取消上传">&times;</button>';
         uploadPreview.classList.remove('hidden');
 
         document.getElementById('cancel-upload').addEventListener('click', clearPendingUpload);
@@ -251,16 +297,22 @@ function handleFileSelect(file) {
     reader.readAsDataURL(file);
 }
 
+function setConnected(connected) {
+    statusDot.className = connected ? 'status connected' : 'status disconnected';
+    statusDot.title = connected ? 'Connected' : 'Disconnected';
+    msgInput.disabled = !connected;
+    sendBtn.disabled = !connected;
+    fileBtn.disabled = !connected;
+    fileBtn.style.opacity = connected ? '1' : '0.45';
+}
+
 function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(proto + '//' + location.host);
 
     ws.onopen = function() {
-        statusDot.className = 'status connected';
-        statusDot.title = 'Connected';
-        msgInput.disabled = false;
-        sendBtn.disabled = false;
-        fileBtn.style.opacity = '1';
+        setConnected(true);
+        syncContext();
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     };
 
@@ -269,13 +321,17 @@ function connect() {
             var data = JSON.parse(e.data);
             if (data.type === 'connected') {
                 myUserId = data.userId;
+                if (data.defaultGroupId) groupInput.value = data.defaultGroupId;
+                identity.textContent = 'User #' + data.userId;
+                updateContext();
                 appendSystemMsg('Connected as #' + data.userId);
             } else if (data.type === 'reply') {
-                var content = data.content || '';
-                appendMessage('bot', content, {
-                    sender: 'Bot',
-                    time: Date.now() / 1000,
-                    segments: data.segments || []
+                appendMessage('bot', data.content || '', {
+                    sender: data.messageType === 'group' ? 'Bot to Group' : 'Bot',
+                    time: data.time || Date.now() / 1000,
+                    segments: data.segments || [],
+                    messageType: data.messageType || 'private',
+                    groupId: data.groupId
                 });
             }
         } catch (err) {
@@ -284,11 +340,8 @@ function connect() {
     };
 
     ws.onclose = function() {
-        statusDot.className = 'status disconnected';
-        statusDot.title = 'Disconnected';
-        msgInput.disabled = true;
-        sendBtn.disabled = true;
-        fileBtn.style.opacity = '0.4';
+        setConnected(false);
+        identity.textContent = myUserId ? 'User #' + myUserId + ' offline' : '未连接';
         appendSystemMsg('Disconnected. Reconnecting...');
         reconnectTimer = setTimeout(connect, 3000);
     };
@@ -298,6 +351,17 @@ function connect() {
     };
 }
 
+modeInputs.forEach(function(input) {
+    input.addEventListener('change', function() {
+        if (!input.checked) return;
+        currentMode = input.value;
+        updateContext();
+        appendSystemMsg('Switched to ' + contextTitle.textContent);
+    });
+});
+
+groupInput.addEventListener('change', updateContext);
+groupInput.addEventListener('input', updateContext);
 sendBtn.addEventListener('click', sendMessage);
 
 msgInput.addEventListener('keydown', function(e) {
@@ -309,7 +373,7 @@ msgInput.addEventListener('keydown', function(e) {
 
 msgInput.addEventListener('input', function() {
     msgInput.style.height = 'auto';
-    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 132) + 'px';
 });
 
 msgInput.addEventListener('paste', function(e) {
@@ -349,5 +413,6 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
+updateContext();
 connect();
 })();
