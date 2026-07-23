@@ -6,11 +6,11 @@ import logger from "./log.js";
 export function registerShutdown(runtime: Runtime): void {
   const onStop = async (signal: string) => {
     logger.info(`${signal} received. Shutting down...`);
-    if (runtime.dashboardDevServer?.pid) {
+    if (runtime.dashboardDevServer) {
       try {
-        process.kill(-runtime.dashboardDevServer.pid);
-      } catch {
-        runtime.dashboardDevServer.kill();
+        await runtime.dashboardDevServer.close();
+      } catch (e) {
+        logger.error(`Failed to close dashboard dev server: ${e}`);
       }
     }
 

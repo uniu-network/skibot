@@ -12,6 +12,9 @@ export interface LogEntry {
 }
 
 const MAX_BUFFER_SIZE = 2000;
+const CONFIGURABLE_LEVELS = ["TRACE", "DEBUG", "INFO", "WARN", "ERROR"] as const;
+
+export type ConfigurableLogLevel = (typeof CONFIGURABLE_LEVELS)[number];
 
 type LogSubscriber = (entry: LogEntry) => void;
 
@@ -85,6 +88,16 @@ class Logger {
 
   private shouldLog(level: string): boolean {
     return this.LEVEL_WEIGHT[level] >= this.LEVEL_WEIGHT[this.getLevel()];
+  }
+
+  public isLevelEnabled(level: string): boolean {
+    const normalized = level.toUpperCase();
+    if (this.LEVEL_WEIGHT[normalized] === undefined) return false;
+    return this.shouldLog(normalized);
+  }
+
+  public setConfiguredLevel(level: ConfigurableLogLevel): void {
+    this.configuredLevel = level;
   }
 
   private log(level: string, message: string) {
@@ -211,4 +224,19 @@ export function getLogBufferAfter(
   search?: string,
 ): LogEntry[] {
   return logger.getBufferAfter(afterId, level, search);
+}
+
+export function setConfiguredLogLevel(level: string): ConfigurableLogLevel {
+  const normalized = level.toUpperCase();
+  if (!isConfigurableLogLevel(normalized)) {
+    throw new Error(
+      `Invalid log level "${level}". Expected one of: ${CONFIGURABLE_LEVELS.join(", ")}`,
+    );
+  }
+  logger.setConfiguredLevel(normalized);
+  return normalized;
+}
+
+function isConfigurableLogLevel(level: string): level is ConfigurableLogLevel {
+  return CONFIGURABLE_LEVELS.includes(level as ConfigurableLogLevel);
 }

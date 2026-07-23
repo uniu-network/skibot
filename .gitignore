@@ -29,3 +29,6 @@ data/jwt/*.*
 docs
 *.timestamp-*
 
+.sisyphus
+opencode.json
+

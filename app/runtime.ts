@@ -1,12 +1,12 @@
 import * as fs from "fs";
-import type { ChildProcess } from "child_process";
+import type { ViteDevServer } from "vite";
 import config from "./config.js";
 import { BotManager } from "./botManager.js";
 import databaseManager from "./database/manager.js";
 
 export interface Runtime {
   botManager: BotManager;
-  dashboardDevServer?: ChildProcess;
+  dashboardDevServer?: ViteDevServer;
   version: string;
 }
 
