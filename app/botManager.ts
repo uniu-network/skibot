@@ -109,6 +109,8 @@ export class BotManager {
       name?: string;
       self_id?: number;
       prefix?: string | string[];
+      error_reply_enabled?: boolean;
+      admin?: string[];
       adapters?: any[];
       plugin_config?: any;
     },

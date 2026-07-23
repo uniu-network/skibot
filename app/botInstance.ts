@@ -35,6 +35,8 @@ export class BotInstance {
     this.bot = new Bot(
       this.config.get("self_id"),
       normalizePrefix(this.config.get("prefix")),
+      this.config.get("error_reply_enabled") ?? true,
+      this.config.get("admin") ?? [],
     );
     this.adapterManager = new AdapterManager(this.bot, this.config);
     this.plugin = new Plugin("./plugins", this.config, opts.version);

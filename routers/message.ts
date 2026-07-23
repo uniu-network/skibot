@@ -34,9 +34,15 @@ class ElysiaAdapterResponse {
 export function createMessageRoutes(botManager: BotManager): AnyElysia {
   const router = new Elysia({ prefix: "/message" });
 
+  router.onRequest(async ({ request, store }: any) => {
+    store.rawBody = await request.clone().text();
+  });
+
   async function handle(
     instance: ReturnType<BotManager["getFirstInstance"]>,
     body: unknown,
+    rawBody: string | undefined,
+    headers: Record<string, string>,
   ): Promise<Response> {
     if (!instance) {
       return new Response("No bot instances available", { status: 404 });
@@ -44,7 +50,7 @@ export function createMessageRoutes(botManager: BotManager): AnyElysia {
 
     const res = new ElysiaAdapterResponse();
     const handled = await instance.adapterManager.handleHttpRequest(
-      { body },
+      { body, rawBody, headers },
       res,
     );
     if (!handled) {
@@ -54,19 +60,25 @@ export function createMessageRoutes(botManager: BotManager): AnyElysia {
     return res.toResponse();
   }
 
-  router.post("/:botId", async ({ params, body }) => {
+  router.post("/:botId", async ({ params, body, store, request }: any) => {
     const botId = params.botId;
     const instance = botManager.getInstance(botId);
     if (!instance) {
       return new Response(`Bot "${botId}" not found`, { status: 404 });
     }
 
-    return handle(instance, body);
+    const rawBody = store.rawBody as string | undefined;
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value: string, key: string) => { headers[key] = value; });
+    return handle(instance, body, rawBody, headers);
   });
 
-  router.post("/", async ({ body }) =>
-    handle(botManager.getFirstInstance(), body),
-  );
+  router.post("/", async ({ body, store, request }: any) => {
+    const rawBody = store.rawBody as string | undefined;
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value: string, key: string) => { headers[key] = value; });
+    return handle(botManager.getFirstInstance(), body, rawBody, headers);
+  });
 
   return router;
 }

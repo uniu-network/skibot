@@ -95,6 +95,8 @@ export function createBotConfigFile(
     name?: string;
     self_id?: number;
     prefix?: string | string[];
+    error_reply_enabled?: boolean;
+    admin?: string[];
     adapters?: any[];
     plugin_config?: any;
   },
@@ -111,6 +113,8 @@ export function createBotConfigFile(
     name: config.name || botId,
     self_id: config.self_id ?? 10000,
     prefix: config.prefix || ["/"],
+    error_reply_enabled: config.error_reply_enabled ?? true,
+    admin: config.admin || [],
   };
   if (config.adapters && config.adapters.length > 0) {
     defaultConfig.adapters = config.adapters;

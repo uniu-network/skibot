@@ -2,8 +2,17 @@ name: "Bot-1"
 self_id: 12345
 prefix:
   - /
+error_reply_enabled: true
 adapters:
   - type: onebotHttp
     config:
+      # OneBot v11 HTTP API base for outbound calls, e.g. /send_group_msg.
+      # This is the OneBot server, not SkiBot's /message callback URL.
+      api_url: http://127.0.0.1:5700
+      # Deprecated compatibility fallback for api_url.
       url: http://127.0.0.1:5700
+      # Optional OneBot v11 HMAC-SHA1 secret for validating inbound reports.
+      secret: ""
+      # Optional OneBot v11 access token for outbound HTTP API requests.
+      access_token: ""
 plugin_config: {}

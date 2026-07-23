@@ -166,6 +166,9 @@
       <n-form-item label="命令前缀">
         <n-dynamic-tags v-model:value="createForm.prefix" />
       </n-form-item>
+      <n-form-item label="错误回复">
+        <n-switch v-model:value="createForm.error_reply_enabled" />
+      </n-form-item>
     </n-space>
   </n-modal>
 
@@ -190,6 +193,9 @@
           </n-form-item>
           <n-form-item label="命令前缀">
             <n-dynamic-tags v-model:value="configData.prefix" />
+          </n-form-item>
+          <n-form-item label="错误回复">
+            <n-switch v-model:value="configData.error_reply_enabled" />
           </n-form-item>
           <n-divider>适配器配置</n-divider>
           <n-alert type="info" :bordered="false" style="margin-bottom: 8px">
@@ -259,6 +265,7 @@ const createForm = ref({
   name: "",
   self_id: 10000,
   prefix: ["/"],
+  error_reply_enabled: true,
 });
 
 const configDrawerVisible = ref(false);
@@ -271,6 +278,7 @@ const configData = ref({
   prefix: ["/"],
   adapters: [],
   plugin_config: {},
+  error_reply_enabled: true,
 });
 
 async function loadBots() {
@@ -371,12 +379,19 @@ async function onCreateBot() {
         name: createForm.value.name || createForm.value.botId.trim(),
         self_id: createForm.value.self_id,
         prefix: createForm.value.prefix,
+        error_reply_enabled: createForm.value.error_reply_enabled,
       },
       { withCredentials: true },
     );
     message.success(`Bot ${createForm.value.botId} 创建成功`);
     showCreateModal.value = false;
-    createForm.value = { botId: "", name: "", self_id: 10000, prefix: ["/"] };
+    createForm.value = {
+      botId: "",
+      name: "",
+      self_id: 10000,
+      prefix: ["/"],
+      error_reply_enabled: true,
+    };
     await loadBots();
   } catch (e) {
     message.error(
@@ -409,6 +424,7 @@ async function openConfig(bot) {
           : ["/"],
       adapters: cfg.adapters || [],
       plugin_config: cfg.plugin_config || {},
+      error_reply_enabled: cfg.error_reply_enabled ?? true,
     };
   } catch (e) {
     message.error(`获取配置失败: ${e.message || "未知错误"}`);
@@ -428,6 +444,7 @@ async function saveConfig() {
         name: configData.value.name,
         self_id: configData.value.self_id,
         prefix: configData.value.prefix,
+        error_reply_enabled: configData.value.error_reply_enabled,
       },
       { withCredentials: true },
     );
