@@ -63,7 +63,7 @@ export class OneBotHTTPAdapter implements IHTTPAdapter, ISendMessage {
   }
 
   private get apiUrl(): string {
-    return this.config.api_url || this.config.url;
+    return this.config.api_url;
   }
 
   async handleHttpRequest(req: any, res: any): Promise<boolean> {

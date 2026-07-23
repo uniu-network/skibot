@@ -3,7 +3,6 @@
   "name": "OneBot HTTP",
   "defaultConfig": {
     "api_url": "http://127.0.0.1:5700",
-    "url": "http://127.0.0.1:5700",
     "secret": "",
     "access_token": ""
   }
