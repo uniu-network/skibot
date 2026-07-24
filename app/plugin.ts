@@ -22,7 +22,9 @@ export class Plugin {
   private plugins: Array<string>;
   private loadedPlugins: Map<string, { dir: string; instance: BasePluginType }>;
   private watcher: fs.FSWatcher | null = null;
+  private watchers: Set<fs.FSWatcher> = new Set();
   private reloadTimer: NodeJS.Timeout | null = null;
+  private reloading = false;
   private bot: Bot | null = null;
   private adapterManager: AdapterManager | null = null;
   private dbProvider: ((pluginName: string) => ScopedDatabaseClient) | null =
@@ -75,8 +77,19 @@ export class Plugin {
         compilerOptions,
         fileName: fileIndexPath,
       }).outputText;
-      fs.writeFileSync(fileIndexPath.replace(".ts", ".js"), result);
-      fileIndexPath = fileIndexPath.replace(".ts", ".js");
+      const jsIndexPath = fileIndexPath.replace(".ts", ".js");
+      // 仅在内容实际变化时写盘，避免无变化触发 watch 自激
+      let shouldWrite = true;
+      try {
+        if (fs.existsSync(jsIndexPath)) {
+          const existing = fs.readFileSync(jsIndexPath, "utf8");
+          if (existing === result) shouldWrite = false;
+        }
+      } catch {}
+      if (shouldWrite) {
+        fs.writeFileSync(jsIndexPath, result);
+      }
+      fileIndexPath = jsIndexPath;
 
       const pluginJson = JSON.parse(fs.readFileSync(pluginInfoPath, "utf-8"));
       const pluginName = pluginJson.name;
@@ -166,13 +179,19 @@ export class Plugin {
 
   async reloadPlugins(globalConfig: Config): Promise<void> {
     if (!this.bot || !this.adapterManager) return;
-
-    this.botConfig.reload();
-    const loadedNames = [...this.loadedPlugins.keys()];
-    for (const pluginName of loadedNames) {
-      await this.unloadPlugin(pluginName);
+    // 互斥锁：重载进行中不重复触发
+    if (this.reloading) return;
+    this.reloading = true;
+    try {
+      this.botConfig.reload();
+      const loadedNames = [...this.loadedPlugins.keys()];
+      for (const pluginName of loadedNames) {
+        await this.unloadPlugin(pluginName);
+      }
+      await this.loadPlugins(this.bot, this.adapterManager, globalConfig);
+    } finally {
+      this.reloading = false;
     }
-    await this.loadPlugins(this.bot, this.adapterManager, globalConfig);
   }
 
   async reloadPlugin(pluginName: string, globalConfig: Config): Promise<void> {
@@ -229,30 +248,87 @@ export class Plugin {
   watchPlugins(globalConfig: Config): void {
     if (this.watcher || !fs.existsSync(this.pluginDir)) return;
 
-    this.watcher = fs.watch(
-      this.pluginDir,
-      { recursive: true },
-      (eventType, filename) => {
+    const watch = (dir: string) => {
+      if (!fs.existsSync(dir)) return;
+      const handle = fs.watch(dir, (eventType, filename) => {
         if (!filename) return;
-        const normalized = filename.toString();
-        if (normalized.endsWith(".js") || normalized.includes("node_modules"))
+        const raw = filename.toString();
+        // 归一化路径分隔符，兼容 Windows
+        const normalized = raw.split(path.sep).join("/");
+        const lower = normalized.toLowerCase();
+
+        // 排除转译产物（避免 reload 自激）
+        if (lower.endsWith(".js") || lower.includes("/node_modules/")) return;
+
+        // 只对真正值得关注的文件触发重载
+        const isSourceFile =
+          lower.endsWith(".ts") ||
+          lower.endsWith(".json") ||
+          lower === "package.json";
+        if (!isSourceFile) return;
+
+        // 排除编辑器的临时/原子保存残留
+        if (
+          lower.endsWith(".swp") ||
+          lower.endsWith(".swo") ||
+          lower.endsWith("~") ||
+          lower.endsWith(".tmp") ||
+          lower.endsWith(".bak") ||
+          lower.includes(".un~") ||
+          lower.endsWith(".crdownload") ||
+          lower.endsWith(".part")
+        ) {
           return;
+        }
+
+        // 处于重载过程中时直接忽略，避免事件密集到达时排重入队列
+        if (this.reloading) return;
 
         if (this.reloadTimer) clearTimeout(this.reloadTimer);
         this.reloadTimer = setTimeout(async () => {
+          this.reloadTimer = null;
           logger.info(
             `Plugin change detected: ${normalized}, reloading plugins`,
           );
           await this.reloadPlugins(globalConfig);
         }, 300);
-      },
-    );
+      });
+      if (this.watcher) {
+        // 多个 watcher 一起管理
+        this.watchers.add(handle);
+      } else {
+        this.watcher = handle;
+        this.watchers.add(handle);
+      }
+    };
+
+    // 顶层目录
+    watch(this.pluginDir);
+    // Linux 下 fs.watch 不支持 recursive，Node.js 会发出 experimental 警告。
+    // 这里手动 watch 每个插件子目录，规避该限制并确保事件来源精确。
+    if (fs.existsSync(this.pluginDir)) {
+      for (const entry of fs.readdirSync(this.pluginDir)) {
+        const sub = path.join(this.pluginDir, entry);
+        try {
+          if (fs.statSync(sub).isDirectory()) {
+            watch(sub);
+          }
+        } catch {}
+      }
+    }
   }
 
   async close(): Promise<void> {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
+    for (const w of this.watchers) {
+      try {
+        w.close();
+      } catch {}
+    }
+    this.watchers.clear();
+    this.watcher = null;
+    if (this.reloadTimer) {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = null;
     }
     const loadedNames = [...this.loadedPlugins.keys()];
     for (const pluginName of loadedNames) {
